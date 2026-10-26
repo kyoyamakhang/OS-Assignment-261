@@ -1,0 +1,12 @@
+1 11
+alloc 300 0
+alloc 100 1
+free 0
+kmalloc 200 2
+dma_memcpy 1 2 0 4
+copy_from_user 1 4 0 3
+kmalloc 200 4
+copy_to_user 3 4 0 3
+free 2
+free 1
+free 3

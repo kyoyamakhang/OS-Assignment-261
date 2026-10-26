@@ -1,0 +1,168 @@
+Time slot   0
+ld_routine
+Time slot   1
+	Loaded a process at input/proc/p0s, PID: 1 PRIO: 130
+Time slot   2
+	CPU 3: Dispatched process  1
+	Loaded a process at input/proc/m0s, PID: 2 PRIO: 120
+Time slot   3
+	CPU 2: Dispatched process  2
+ PDG=b44fb220b3b08680 P4g=b44fb220b3b09690 PUD=b44fb220b3b0a6a0 PMD=b44fb220b3b0b6b0
+ PDG=b4cfc220b3b08680 P4g=b4cfc220b3b09690 PUD=b4cfc220b3b0a6a0 PMD=b4cfc220b3b0b6b0
+Time slot   4
+	CPU 3: Put process  1 to run queue
+	CPU 3: Dispatched process  1
+	Loaded a process at input/proc/s3, PID: 3 PRIO: 39
+ PDG=b4cfc220b3b0f170 P4g=b4cfc220b3b10180 PUD=b4cfc220b3b11190 PMD=b4cfc220b3b121a0
+ PDG=b44fb220b3b0f170 P4g=b44fb220b3b10180 PUD=b44fb220b3b11190 PMD=b44fb220b3b121a0
+Time slot   5
+ PDG=b44fb230b3b0f170 P4g=b44fb230b3b10180 PUD=b44fb230b3b11190 PMD=b44fb230b3b121a0
+	CPU 2: Put process  2 to run queue
+	CPU 2: Dispatched process  3
+	CPU 1: Dispatched process  2
+	Loaded a process at input/proc/s0, PID: 4 PRIO: 38
+Time slot   6
+	CPU 3: Put process  1 to run queue
+	CPU 3: Dispatched process  4
+	CPU 0: Dispatched process  1
+ PDG=b54fd220b3b15ae0 P4g=b54fd220b3b16af0 PUD=b54fd220b3b17b00 PMD=b54fd220b3b18b10
+ PDG=b5cfe220b3b15ae0 P4g=b5cfe220b3b16af0 PUD=b5cfe220b3b17b00 PMD=b5cfe220b3b18b10
+Time slot   7
+	CPU 2: Put process  3 to run queue
+	CPU 2: Dispatched process  3
+	CPU 1: Put process  2 to run queue
+	CPU 1: Dispatched process  2
+ PDG=b54fd210b3b15ae0 P4g=b54fd210b3b16af0 PUD=b54fd210b3b17b00 PMD=b54fd210b3b18b10
+ PDG=b5cfe210b3b15ae0 P4g=b5cfe210b3b16af0 PUD=b5cfe210b3b17b00 PMD=b5cfe210b3b18b10
+Time slot   8
+	CPU 3: Put process  4 to run queue
+	CPU 3: Dispatched process  4
+ PDG=b54fd210b3b15ae0 P4g=b54fd210b3b16af0 PUD=b54fd210b3b17b00 PMD=b54fd210b3b18b10
+	CPU 0: Put process  1 to run queue
+	CPU 0: Dispatched process  1
+Time slot   9
+	CPU 2: Put process  3 to run queue
+	CPU 2: Dispatched process  3
+	CPU 1: Processed  2 has finished
+libread:426
+	Loaded a process at input/proc/m1s, PID: 5 PRIO: 15
+Time slot  10
+	CPU 3: Put process  4 to run queue
+	CPU 3: Dispatched process  5
+	CPU 1: Dispatched process  4
+	CPU 0: Put process  1 to run queue
+	CPU 0: Dispatched process  1
+ PDG=b44fb220b3b1c2d0 P4g=b44fb220b3b1d2e0 PUD=b44fb220b3b1e2f0 PMD=b44fb220b3b1f300
+Time slot  11
+	CPU 2: Put process  3 to run queue
+	CPU 2: Dispatched process  3
+ PDG=b5cfe230b3b1c2d0 P4g=b5cfe230b3b1d2e0 PUD=b5cfe230b3b1e2f0 PMD=b5cfe230b3b1f300
+	Loaded a process at input/proc/p1s, PID: 6 PRIO: 15
+ PDG=b44fb220b3b22c90 P4g=b44fb220b3b23ca0 PUD=b44fb220b3b24cb0 PMD=b44fb220b3b25cc0
+Time slot  12
+	CPU 3: Put process  5 to run queue
+	CPU 3: Dispatched process  6
+	CPU 1: Put process  4 to run queue
+	CPU 1: Dispatched process  5
+ PDG=b54fd230b3b22c90 P4g=b54fd230b3b23ca0 PUD=b54fd230b3b24cb0 PMD=b54fd230b3b25cc0
+	CPU 0: Put process  1 to run queue
+	CPU 0: Dispatched process  4
+Time slot  13
+	CPU 2: Put process  3 to run queue
+	CPU 2: Dispatched process  3
+	Loaded a process at input/proc/s2, PID: 7 PRIO: 120
+ PDG=b54fd220b3b29560 P4g=b54fd220b3b2a570 PUD=b54fd220b3b2b580 PMD=b54fd220b3b2c590
+Time slot  14
+	CPU 3: Put process  6 to run queue
+	CPU 3: Dispatched process  6
+	CPU 1: Put process  5 to run queue
+	CPU 1: Dispatched process  5
+ PDG=b54fd230b3b29560 P4g=b54fd230b3b2a570 PUD=b54fd230b3b2b580 PMD=b54fd230b3b2c590
+	CPU 0: Put process  4 to run queue
+	CPU 0: Dispatched process  4
+Time slot  15
+	CPU 2: Put process  3 to run queue
+	CPU 2: Dispatched process  3
+ PDG=b54fd230b3b29560 P4g=b54fd230b3b2a570 PUD=b54fd230b3b2b580 PMD=b54fd230b3b2c590
+Time slot  16
+	CPU 3: Put process  6 to run queue
+	CPU 3: Dispatched process  6
+	CPU 1: Processed  5 has finished
+	CPU 1: Dispatched process  7
+	CPU 0: Put process  4 to run queue
+	CPU 0: Dispatched process  4
+	Loaded a process at input/proc/s1, PID: 8 PRIO: 0
+Time slot  17
+	CPU 2: Put process  3 to run queue
+	CPU 2: Dispatched process  8
+Time slot  18
+	CPU 3: Put process  6 to run queue
+	CPU 3: Dispatched process  6
+	CPU 1: Put process  7 to run queue
+	CPU 1: Dispatched process  3
+	CPU 0: Put process  4 to run queue
+	CPU 0: Dispatched process  4
+Time slot  19
+	CPU 2: Put process  8 to run queue
+	CPU 2: Dispatched process  8
+Time slot  20
+	CPU 3: Put process  6 to run queue
+	CPU 3: Dispatched process  6
+	CPU 1: Put process  3 to run queue
+	CPU 1: Dispatched process  3
+	CPU 0: Put process  4 to run queue
+	CPU 0: Dispatched process  4
+Time slot  21
+	CPU 2: Put process  8 to run queue
+	CPU 2: Dispatched process  8
+	CPU 0: Processed  4 has finished
+	CPU 0: Dispatched process  7
+Time slot  22
+	CPU 3: Put process  6 to run queue
+	CPU 3: Dispatched process  6
+	CPU 1: Processed  3 has finished
+	CPU 1: Dispatched process  1
+ PDG=b54fd210b3b2fdc0 P4g=b54fd210b3b30dd0 PUD=b54fd210b3b31de0 PMD=b54fd210b3b32df0
+Time slot  23
+	CPU 2: Put process  8 to run queue
+	CPU 2: Dispatched process  8
+	CPU 0: Put process  7 to run queue
+	CPU 0: Dispatched process  7
+Time slot  24
+	CPU 3: Put process  6 to run queue
+	CPU 3: Dispatched process  6
+	CPU 1: Put process  1 to run queue
+	CPU 1: Dispatched process  1
+libread:426
+Time slot  25
+	CPU 2: Put process  8 to run queue
+	CPU 2: Dispatched process  8
+ PDG=b54fd210b3b2fdc0 P4g=b54fd210b3b30dd0 PUD=b54fd210b3b31de0 PMD=b54fd210b3b32df0
+	CPU 0: Put process  7 to run queue
+	CPU 0: Dispatched process  7
+Time slot  26
+	CPU 2: Processed  8 has finished
+	CPU 2 stopped
+	CPU 3: Put process  6 to run queue
+	CPU 3: Dispatched process  6
+	CPU 1: Put process  1 to run queue
+	CPU 1: Dispatched process  1
+Time slot  27
+	CPU 0: Put process  7 to run queue
+	CPU 0: Dispatched process  7
+	CPU 1: Processed  1 has finished
+	CPU 1 stopped
+Time slot  28
+	CPU 3: Put process  6 to run queue
+	CPU 3: Dispatched process  6
+Time slot  29
+	CPU 0: Put process  7 to run queue
+	CPU 0: Dispatched process  7
+Time slot  30
+	CPU 3: Put process  6 to run queue
+	CPU 3: Dispatched process  6
+Time slot  31
+	CPU 3: Processed  6 has finished
+	CPU 3 stopped
+	CPU 0: Processed  7 has finished
+	CPU 0 stopped
