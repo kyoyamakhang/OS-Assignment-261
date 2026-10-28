@@ -17,13 +17,14 @@ The assignment's page-replacement requirements are lecturer-defined. Confirm the
 | **5** | System calls and user/kernel protection | `src/syscall.c`, `src/sys_mem.c`, `src/syscall.tbl`, syscall and memory-access paths | Verify syscall dispatch and argument handling; enforce PID-based kernel interactions and user/kernel separation; validate addresses and user-copy paths; test successful and rejected operations; answer syscall/protection questionnaire items. |
 | **6** | DMA and end-to-end integration | `src/dma_c_testbench.cpp`, `src/dpi_rtl.cpp`, `src/sysbus.c`, DMA integration in `src/os.c` | Integrate and test the real Verilator-backed DMA engine; establish bus-address handling; implement or connect asynchronous completion/error signaling; run end-to-end builds and tests; coordinate demo preparation and final packaging. |
 
-**Which member assigned to which Person**
-**Person 1:**
-**Person 2:**
-**Person 3:**
-**Person 4:**
-**Person 5:**
-**Person 6:**
+**Which member assigned to which Person (Subjected to change if necessary)**
+**Person 1:**       Khoa Phùng
+**Person 2:**       Hiệp
+**Person 3:**       Khang
+**Person 4:**       Nguyên
+**Person 5:**       Thông
+**Person 6:**       Khoa Phạm
+**Integration:**    All members support **Person 6** in integrating
 
 Everyone should review the integrated system, test their own changes, contribute their report section, and be prepared to explain their work in the demonstration. Person 6 coordinates integration and packaging but is not solely responsible for testing other people's subsystems.
 
