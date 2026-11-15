@@ -40,8 +40,7 @@ struct vm_area_struct *get_vma_by_num (struct mm_struct *mm, int vmaid_target) {
 //----------------------------------------------------------------
 //-----------<Get VM area for a number of pages>------------------
 //----------------------------------------------------------------
-struct vm_rg_struct *get_vm_area_node_at_brk(struct pcb_t *caller, int vmaid, addr_t alignedsz)
-{
+struct vm_rg_struct *get_vm_area_node_at_brk(struct pcb_t *caller, int vmaid, addr_t alignedsz) {
     if (!caller || alignedsz == 0) return NULL;
 
     struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid); 
@@ -67,9 +66,7 @@ struct vm_rg_struct *get_vm_area_node_at_brk(struct pcb_t *caller, int vmaid, ad
 //----------------------------------------------------------------
 //---------------------<Check for VMA overlap>--------------------
 //----------------------------------------------------------------
-int validate_overlap_vm_area(struct pcb_t *caller, int vmaid,
-                             addr_t vmastart, addr_t vmaend)
-{
+int validate_overlap_vm_area(struct pcb_t *caller, int vmaid, addr_t vmastart, addr_t vmaend) {
     if (!caller || vmastart >= vmaend) return -1;
 
     struct vm_area_struct *cur_area = get_vma_by_num(caller->mm, vmaid);
@@ -92,8 +89,7 @@ int validate_overlap_vm_area(struct pcb_t *caller, int vmaid,
 //----------------------------------------------------------------
 //---------------------<Extend a virtual memory area>-------------
 //----------------------------------------------------------------
-int inc_vma_limit(struct pcb_t *caller, int vmaid, addr_t inc_sz)
-{
+int inc_vma_limit(struct pcb_t *caller, int vmaid, addr_t inc_sz) {
     if (!caller || inc_sz == 0) return -1;
 
     struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
@@ -141,8 +137,7 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, addr_t inc_sz)
 //----------------------------------------------------------------
 //---------------------<Copy a RAM page to swap>------------------
 //----------------------------------------------------------------
-int __mm_swap_page(struct pcb_t *caller, addr_t victim_fpn, addr_t swap_fpn)
-{
+int __mm_swap_page(struct pcb_t *caller, addr_t victim_fpn, addr_t swap_fpn) {
     if (!caller) return -1; // kiểm tra caller rỗng
     if (!caller->krnl) return -1; // sau đó kiểm tra caller->krnl rỗng
 
