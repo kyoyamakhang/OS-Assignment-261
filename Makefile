@@ -81,6 +81,12 @@ HEADER = $(wildcard $(INCLUDE)/*.h)
 all: os
 #mem sched os
 
+.PHONY: test-person5-week2
+
+test-person5-week2: $(OBJ)
+	$(CC) -std=gnu11 -Wall -Wextra $(INC) tests/test_libsyscall.c $(SRC)/libstd.c -o $(OBJ)/test_libsyscall
+	./$(OBJ)/test_libsyscall
+
 # Just compile memory management modules
 mem: $(MEM_OBJ)
 	$(MAKE) $(LFLAGS) $(MEM_OBJ) -o mem $(LIB)
