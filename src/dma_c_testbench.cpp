@@ -21,13 +21,13 @@
 
 #include "sysbus.h"
 #include "dpi_rtl.h"
+#include "dma.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <cstdbool>
-#include <thread>
-#include <atomic>
+#include <pthread.h>
 
 // Generated DPI functions from RTL
 #include <verilated.h>
@@ -35,16 +35,33 @@
 #include "Vdma_top.h"
 #include "Vdma_top__Dpi.h"  
 
-#if DMA_MAIN == 1
 extern "C" {
 #include "common.h"
 #include "os-mm.h"
 }
-#endif
 
 // RTL Direct Test - Drive Verilator RTL directly
 extern "C" int dpi_rtl_dma_copy(uint64_t src_offset, uint64_t dst_offset, uint64_t length);
 extern "C" int dpi_rtl_dma_is_available(void);
+
+// Synchronization structures for asynchronous co-processor DMA execution
+static pthread_mutex_t dma_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t dma_req_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t dma_done_cond = PTHREAD_COND_INITIALIZER;
+
+struct dma_req_t {
+    struct pcb_t *caller;
+    uint64_t source;
+    uint64_t destination;
+    uint64_t length;
+    int pending;
+    int completed;
+    int result;
+};
+
+static struct dma_req_t g_dma_req = {NULL, 0, 0, 0, 0, 0, 0};
+static int g_dma_worker_active = 0;
+static int g_dma_worker_stop = 0;
 
 /*
  * dpi_dma_copy - perform DMA copy via DPI
@@ -55,19 +72,48 @@ extern "C" int dpi_rtl_dma_is_available(void);
 int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset, uint64_t length) {
     void *src = NULL;
     void *dst = NULL;
-    //struct krnl_t *krnl = caller->krnl;
+    struct krnl_t *krnl = (caller != NULL) ? caller->krnl : NULL;
+
+    if (length == 0) {
+        printf("dpi_dma_copy: invalid length 0\n");
+        return -1;
+    }
 
     if (memory_bank_is_available()) {
         printf("dma_testbench modeo with dpi_dma_copy from memory bank\n");
+        size_t bank_sz = memory_bank_get_size();
+        if (src_offset >= bank_sz || dst_offset >= bank_sz ||
+            length > bank_sz - src_offset || length > bank_sz - dst_offset) {
+            printf("dpi_dma_copy: address out of memory bank range\n");
+            return -1;
+        }
         src = memory_bank_get_ptr(src_offset);
         dst = memory_bank_get_ptr(dst_offset);
     } else {
         /*
-         * TODO: map system OS memory address
+         * Map system OS physical memory address (krnl->mram)
          */
-        //printf("dma_testbench modeo with OS memory address\n");
-        //src =  krnl->...
-        //dst =  krnl->...
+        if (krnl == NULL || krnl->mram == NULL ||
+            krnl->mram->storage == NULL || krnl->mram->maxsz <= 0) {
+            printf("dpi_dma_copy: OS physical memory (mram) is not initialized\n");
+            return -1;
+        }
+
+        size_t mram_sz = (size_t)krnl->mram->maxsz;
+        if (src_offset >= mram_sz || dst_offset >= mram_sz ||
+            length > mram_sz - src_offset || length > mram_sz - dst_offset) {
+            printf("dpi_dma_copy: address out of OS mram range\n");
+            return -1;
+        }
+
+        printf("dma_testbench modeo with OS memory address\n");
+        memory_bank_set_os_mem(krnl->mram->storage, mram_sz);
+        src = krnl->mram->storage + src_offset;
+        dst = krnl->mram->storage + dst_offset;
+    }
+
+    if (src == NULL || dst == NULL) {
+        return -1;
     }
 
     printf("dpi_dma_copy: src=%llu, dst=%llu, len=%llu\n", 
@@ -128,6 +174,47 @@ int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset,
 }
 
 /*
+ * dma_worker_loop - Asynchronous co-processor worker loop
+ */
+extern "C" void dma_worker_loop(void) {
+    pthread_mutex_lock(&dma_lock);
+    g_dma_worker_active = 1;
+    g_dma_worker_stop = 0;
+
+    while (!g_dma_worker_stop) {
+        while (!g_dma_req.pending && !g_dma_worker_stop) {
+            pthread_cond_wait(&dma_req_cond, &dma_lock);
+        }
+
+        if (g_dma_worker_stop && !g_dma_req.pending) {
+            break;
+        }
+
+        g_dma_req.result = dpi_dma_copy(g_dma_req.caller,
+                                        g_dma_req.source,
+                                        g_dma_req.destination,
+                                        g_dma_req.length);
+        g_dma_req.pending = 0;
+        g_dma_req.completed = 1;
+
+        pthread_cond_signal(&dma_done_cond);
+    }
+
+    g_dma_worker_active = 0;
+    pthread_mutex_unlock(&dma_lock);
+}
+
+/*
+ * dma_stop_worker - Stop asynchronous co-processor worker loop
+ */
+extern "C" void dma_stop_worker(void) {
+    pthread_mutex_lock(&dma_lock);
+    g_dma_worker_stop = 1;
+    pthread_cond_signal(&dma_req_cond);
+    pthread_mutex_unlock(&dma_lock);
+}
+
+/*
  * do_dma - perform DMA function
  * source: source memory
  * destination: destination memory
@@ -137,15 +224,41 @@ extern "C" int do_dma(struct pcb_t *caller,uint64_t source, uint64_t destination
     
     int test_errors = 0;
 
-    /* Perform DMA copy using DPI with provided caller and parameters */
-    test_errors += dpi_dma_copy(caller, source, destination, length);
+    pthread_mutex_lock(&dma_lock);
+    if (g_dma_worker_active) {
+        /* Wait if a previous DMA request is still in progress */
+        while (g_dma_req.pending) {
+            pthread_cond_wait(&dma_done_cond, &dma_lock);
+        }
 
-    /*
-     * TODO: This asynchronous implementation of DMA
-     *        DMA completion callback is not yet implemented in this testbench
-     */
-    // Install callback handler
-    //dma_done_callback();  // Call the callback to signal DMA completion
+        /* Submit request to co_processor thread */
+        g_dma_req.caller = caller;
+        g_dma_req.source = source;
+        g_dma_req.destination = destination;
+        g_dma_req.length = length;
+        g_dma_req.completed = 0;
+        g_dma_req.result = 0;
+        g_dma_req.pending = 1;
+
+        pthread_cond_signal(&dma_req_cond);
+
+        /* Wait for co_processor to complete transfer */
+        while (!g_dma_req.completed) {
+            pthread_cond_wait(&dma_done_cond, &dma_lock);
+        }
+
+        test_errors = g_dma_req.result;
+        pthread_mutex_unlock(&dma_lock);
+    } else {
+        pthread_mutex_unlock(&dma_lock);
+        /* Perform DMA copy using DPI with provided caller and parameters */
+        test_errors += dpi_dma_copy(caller, source, destination, length);
+    }
+
+    /* Ensure completion callback is invoked if RTL finished without triggering it */
+    if (test_errors == 0 && !dma_is_done()) {
+        dma_done_callback();
+    }
 
     return test_errors;
 }
