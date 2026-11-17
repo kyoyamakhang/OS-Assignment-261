@@ -10,6 +10,9 @@
 
 #include "common.h"
 
+#define SYSCALL_ERR_NOT_IMPLEMENTED (-38)
+#define SYSCALL_ERR_INVALID (-22)
+
 
 struct sc_regs {
         arg_t a1;

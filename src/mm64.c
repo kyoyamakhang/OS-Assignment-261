@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
+#include <limits.h>
 
 #if defined(MM64)
 
@@ -152,44 +153,36 @@ static void free_page_list(struct pgn_t *pages)
     pages = next;
   }
 }
+//----------------------------------------------------------------
+//------------<Parse address to 5 page directory level>-----------
+//----------------------------------------------------------------
+int get_pd_from_address(addr_t addr, addr_t *pgd, addr_t *p4d, addr_t *pud, addr_t *pmd, addr_t *pt) {
+  const addr_t mask = 0x1FF; // dùng để lấy 9 bits của mỗi level
 
-/*
- * get_pd_from_pagenum - Parse address to 5 page directory level
- * @pgn   : pagenumer
- * @pgd   : page global directory
- * @p4d   : page level directory
- * @pud   : page upper directory
- * @pmd   : page middle directory
- * @pt    : page table 
- */
-int get_pd_from_address(addr_t addr, addr_t* pgd, addr_t* p4d, addr_t* pud, addr_t* pmd, addr_t* pt)
-{
-	/* Extract page direactories */
-	*pgd = (addr&PAGING64_ADDR_PGD_MASK)>>PAGING64_ADDR_PGD_LOBIT;
-	*p4d = (addr&PAGING64_ADDR_P4D_MASK)>>PAGING64_ADDR_P4D_LOBIT;
-	*pud = (addr&PAGING64_ADDR_PUD_MASK)>>PAGING64_ADDR_PUD_LOBIT;
-	*pmd = (addr&PAGING64_ADDR_PMD_MASK)>>PAGING64_ADDR_PMD_LOBIT;
-	*pt = (addr&PAGING64_ADDR_PT_MASK)>>PAGING64_ADDR_PT_LOBIT;
+  // 64 bits thì sẽ có bit 57-63 là bit sign dựa vào bit 56
+  *pgd = (addr >> PAGING64_ADDR_PGD_LOBIT) & mask;
+  // lấy 9 bits của bit pgd để trích xuất trang (gồm bit 48-56)
 
-	/* TODO: implement the page direactories mapping */
+  *p4d = (addr >> PAGING64_ADDR_P4D_LOBIT) & mask;
+  // lấy 9 bits của bit p4d để trích xuất trang (gồm bit 39-47)
 
-	return 0;
+  *pud = (addr >> PAGING64_ADDR_PUD_LOBIT) & mask;
+  // lấy 9 bits của bit pud để trích xuất trang (gồm bit 30-38)
+
+  *pmd = (addr >> PAGING64_ADDR_PMD_LOBIT) & mask;
+  // lấy 9 bits của bit pmd để trích xuất trang (gồm bit 21-29)
+
+  *pt = (addr >> PAGING64_ADDR_PT_LOBIT) & mask;     
+  // lấy 9 bits của bit pt để trích xuất trang (gồm bit 12-20)
+
+  return 0;
 }
 
-/*
- * get_pd_from_pagenum - Parse page number to 5 page directory level
- * @pgn   : pagenumer
- * @pgd   : page global directory
- * @p4d   : page level directory
- * @pud   : page upper directory
- * @pmd   : page middle directory
- * @pt    : page table 
- */
-int get_pd_from_pagenum(addr_t pgn, addr_t* pgd, addr_t* p4d, addr_t* pud, addr_t* pmd, addr_t* pt)
-{
-	/* Shift the address to get page num and perform the mapping*/
-	return get_pd_from_address(pgn << PAGING64_ADDR_PT_SHIFT,
-                         pgd,p4d,pud,pmd,pt);
+int get_pd_from_pagenum (addr_t pgn, addr_t *pgd, addr_t *p4d, addr_t *pud, addr_t *pmd, addr_t *pt) {
+  const addr_t page_base = pgn << PAGING64_ADDR_PT_SHIFT;
+  // chuyển đổi page number sang địa chỉ vật lý bằng cách dịch trái 12 bit (tương đương nhân với 4096)
+
+  return get_pd_from_address(page_base, pgd, p4d, pud, pmd, pt);
 }
 
 
@@ -713,15 +706,19 @@ int init_mm(struct mm_struct *mm, struct pcb_t *caller)
   return 0;
 }
 
-struct vm_rg_struct *init_vm_rg(addr_t rg_start, addr_t rg_end)
-{
-  struct vm_rg_struct *rgnode = malloc(sizeof(struct vm_rg_struct));
+//----------------------------------------------------------------
+//--------------------<Initialize a VM region>-------------------
+//----------------------------------------------------------------
+struct vm_rg_struct *init_vm_rg(addr_t rg_start, addr_t rg_end) {
+    struct vm_rg_struct *rgnode = malloc(sizeof *rgnode);
+    if (rgnode == NULL) return NULL;
 
-  rgnode->rg_start = rg_start;
-  rgnode->rg_end = rg_end;
-  rgnode->rg_next = NULL;
+    rgnode->vmaid = 0;
+    rgnode->rg_start = rg_start;
+    rgnode->rg_end = rg_end;
+    rgnode->rg_next = NULL;
 
-  return rgnode;
+    return rgnode;
 }
 
 int enlist_vm_rg_node(struct vm_rg_struct **rglist, struct vm_rg_struct *rgnode)

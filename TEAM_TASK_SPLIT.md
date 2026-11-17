@@ -19,8 +19,8 @@ The assignment's page-replacement requirements are lecturer-defined. Confirm the
 
 **Which member assigned to which Person (Subjected to change if necessary)**
 **Person 1:**       Khoa Phùng
-**Person 2:**       Hiệp
-**Person 3:**       Khang
+**Person 2:**       Khang
+**Person 3:**       Hiệp
 **Person 4:**       Nguyên
 **Person 5:**       Thông
 **Person 6:**       Khoa Phạm

@@ -17,7 +17,10 @@ int libsyscall (struct pcb_t *caller,
              arg_t a2,
              arg_t a3)
 {
-   struct sc_regs regs;
+   struct sc_regs regs = {0};
+   if (caller == NULL || caller->krnl == NULL || caller->pid == 0) {
+	  return SYSCALL_ERR_INVALID;
+   }
 
 	/*
 	 * @bksysnet: Please note that the architecture design of
@@ -32,6 +35,7 @@ int libsyscall (struct pcb_t *caller,
    regs.a1 = a1;
    regs.a2 = a2;
    regs.a3 = a3;
+   regs.orig_ax = syscall_idx;
 
    return _syscall(caller->krnl, caller->pid, syscall_idx, &regs);
 }

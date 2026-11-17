@@ -25,189 +25,159 @@
 static pthread_mutex_t mmvm_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t kmm_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/*enlist_vm_freerg_list - add new rg to freerg_list
- *@mm: memory region
- *@rg_elmt: new region
- *
- */
-int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
-{
-  struct vm_rg_struct *rg_node = mm->mmap->vm_freerg_list;
+//----------------------------------------------------------------
+//--------------------<Insert a free VM region>-------------------
+//----------------------------------------------------------------
+int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt) {
+    if (!rg_elmt || rg_elmt->rg_start >= rg_elmt->rg_end) return -1;
+    // kiểm tra rỗng hoặc start >= end thì sẽ không hợp lệ
 
-  if (rg_elmt->rg_start >= rg_elmt->rg_end)
-    return -1;
+    struct vm_area_struct *cur_vma = get_vma_by_num(mm, rg_elmt->vmaid);
+    if (!cur_vma) return -1;
 
-  if (rg_node != NULL)
-    rg_elmt->rg_next = rg_node;
+    // chèn element vào đầu danh sách của free region của virtual mem area hiện tại
+    rg_elmt->rg_next = cur_vma->vm_freerg_list;
+    cur_vma->vm_freerg_list = rg_elmt;
 
-  /* Enlist the new region */
-  mm->mmap->vm_freerg_list = rg_elmt;
-
-  return 0;
+    return 0;
 }
 
-/*get_symrg_byid - get mem region by region ID
- *@mm: memory region
- *@rgid: region ID act as symbol index of variable
- *
- */
+//----------------------------------------------------------------
+//-------------------<Look up a region by ID>---------------------
+//----------------------------------------------------------------
 struct vm_rg_struct *get_symrg_byid(struct mm_struct *mm, int rgid)
 {
-  if (rgid < 0 || rgid > PAGING_MAX_SYMTBL_SZ)
-    return NULL;
-
-  return &mm->symrgtbl[rgid];
+    if (!mm || rgid < 0 || rgid >= PAGING_MAX_SYMTBL_SZ) return NULL; 
+    // kiểm tra mm rỗng hoặc rgid không hợp lệ như việc âm hay vượt quá max
+    
+    return &mm->symrgtbl[rgid]; // trả về địa chỉ của region trong bảng symbol table
 }
 
-/*__alloc - allocate a region memory
- *@caller: caller
- *@vmaid: ID vm area to alloc memory region
- *@rgid: memory region ID (used to identify variable in symbole table)
- *@size: allocated size
- *@alloc_addr: address of allocated memory region
- *
- */
-int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *alloc_addr)
-{
-  /*Allocate at the toproof */
-  pthread_mutex_lock(&mmvm_lock);
-  struct vm_rg_struct rgnode;
-  struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
-  int inc_sz=0;
+//----------------------------------------------------------------
+//--------------------<Allocate a user region>--------------------
+//----------------------------------------------------------------
+int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *alloc_addr) {
+    if (!caller || !caller->mm || !alloc_addr || size == 0 || size > INT_MAX) return -1;
+    // kiểm tra như caller rỗng hoặc caller->mm rỗng hoặc alloc_addr rỗng hoặc size = 0 hoặc size quá lớn thì không hợp lệ
 
-  if (get_free_vmrg_area(caller, vmaid, size, &rgnode) == 0)
-  {
-    caller->mm->symrgtbl[rgid].rg_start = rgnode.rg_start;
-    caller->mm->symrgtbl[rgid].rg_end = rgnode.rg_end;
- 
+    pthread_mutex_lock(&mmvm_lock);
+
+    struct mm_struct *mm = caller->mm;
+    struct vm_rg_struct *region = get_symrg_byid(mm, rgid);
+    struct vm_area_struct *cur_vma = get_vma_by_num(mm, vmaid);
+
+    if (!region || !cur_vma || region->rg_start != 0 || region->rg_end != 0) {
+        pthread_mutex_unlock(&mmvm_lock);
+        return -1;
+    } // kiểm tra những thứ như rỗng hoặc cur_vma rỗng hoặc region đã được cấp phát trước đó thì không hợp lệ
+
+    struct vm_rg_struct rgnode = {0};
+    if (get_free_vmrg_area(caller, vmaid, (int)size, &rgnode) != 0) { 
+      // nếu không thể lấy được vùng nhớ trống thì không hợp lệ
+        const addr_t old_sbrk = cur_vma->sbrk;
+
+        if (!caller->krnl || size > UINT64_MAX - old_sbrk) {
+            pthread_mutex_unlock(&mmvm_lock);
+            return -1;
+        } // kiểm tra nếu caller->krnl rỗng hoặc size quá lớn gây tràn thì sẽ không hợp lệ
+
+        struct sc_regs regs = {0};
+        regs.a1 = SYSMEM_INC_OP;
+        regs.a2 = vmaid;
+        regs.a3 = size;
+        // chuẩn bị các tham số để chuẩn bị cho syscall để tiến hành mở rộng vùng nhớ
+
+        if (_syscall(caller->krnl, caller->pid, 17, &regs) != 0) {
+            pthread_mutex_unlock(&mmvm_lock);
+            return -1;
+        } // nếu syscall báo thất bại thì sẽ return -1
+
+        rgnode.vmaid = vmaid;
+        rgnode.rg_start = old_sbrk;
+        rgnode.rg_end = old_sbrk + size;
+        // cập nhật nhưng thông tin của region mới được cấp phát
+    }
+
+    *region = rgnode;
     *alloc_addr = rgnode.rg_start;
+    // trả về địa chỉ bắt đầu của vùng nhớ được cấp phát
 
     pthread_mutex_unlock(&mmvm_lock);
     return 0;
-  }
-
-  /* TODO get_free_vmrg_area FAILED handle the region management (Fig.6)*/
-
-  /*Attempt to increate limit to get space */
-#ifdef MM64
-  inc_sz = (uint32_t)(size/(int)PAGING64_PAGESZ);
-  inc_sz = inc_sz + 1;
-#else
-  inc_sz = PAGING_PAGE_ALIGNSZ(size);
-#endif
-  int old_sbrk;
-  inc_sz = inc_sz + 1;
-
-  old_sbrk = cur_vma->sbrk;
-
-  /* TODO INCREASE THE LIMIT
-   * SYSCALL 1 sys_memmap
-   */
-  struct sc_regs regs;
-  regs.a1 = SYSMEM_INC_OP;
-  regs.a2 = vmaid;
-#ifdef MM64
-  regs.a3 = size;
-#else
-  regs.a3 = PAGING_PAGE_ALIGNSZ(size);
-#endif  
-  _syscall(caller->krnl, caller->pid, 17, &regs); /* SYSCALL 17 sys_memmap */
-  /*Successful increase limit */
-  caller->mm->symrgtbl[rgid].rg_start = old_sbrk;
-  caller->mm->symrgtbl[rgid].rg_end = old_sbrk + size;
-
-  *alloc_addr = old_sbrk;
-
-  pthread_mutex_unlock(&mmvm_lock);
-  return 0;
-
 }
 
-/*__free - remove a region memory
- *@caller: caller
- *@vmaid: ID vm area to alloc memory region
- *@rgid: memory region ID (used to identify variable in symbole table)
- *@size: allocated size
- *
- */
-int __free(struct pcb_t *caller, int vmaid, int rgid)
-{
-  pthread_mutex_lock(&mmvm_lock);
+//----------------------------------------------------------------
+//----------------------<Free a user region>----------------------
+//----------------------------------------------------------------
+int __free(struct pcb_t *caller, int vmaid, int rgid) {
+    if (!caller || !caller->mm) return -1;
 
-  if (rgid < 0 || rgid > PAGING_MAX_SYMTBL_SZ)
-  {
+    pthread_mutex_lock(&mmvm_lock); // lock để tránh race condition khi thao tác với các vùng nhớ
+
+    struct mm_struct *mm = caller->mm;
+    struct vm_rg_struct *region = get_symrg_byid(mm, rgid); 
+    // ta lấy địa chỉ của region trong bảng symbol table dựa vào rgid
+
+    if (!region || region->rg_start >= region->rg_end || region->vmaid != vmaid || !get_vma_by_num(mm, vmaid)) {
+        pthread_mutex_unlock(&mmvm_lock);
+        return -1;
+    } // kiểm tra rỗng hoặc so start với end hoặc vmaid không hợp lệ hoặc nếu không tìm thấy vma thì không hợp lệ
+
+    struct vm_rg_struct *freerg_node = malloc(sizeof *freerg_node);
+    if (!freerg_node) {
+        pthread_mutex_unlock(&mmvm_lock);
+        return -1;
+    } // cấp phát vùng nhớ cho node mới còn nếu thất bại thì return -1
+
+    *freerg_node = *region;
+    freerg_node->rg_next = NULL;
+    if (enlist_vm_freerg_list(mm, freerg_node) != 0) {
+        free(freerg_node); // nếu ta không thể chèn vào danh sách của free region thì ta giải phóng vùng nhớ đã cấp phát
+        pthread_mutex_unlock(&mmvm_lock);
+        return -1;
+    }
+
+    *region = (struct vm_rg_struct){0};
+    
     pthread_mutex_unlock(&mmvm_lock);
-    return -1;
-  }
-
-  /* TODO: Manage the collect freed region to freerg_list */
-  struct vm_rg_struct *rgnode = get_symrg_byid(caller->mm, rgid);
-
-  if (rgnode->rg_start == 0 && rgnode->rg_end == 0)
-  {
-    pthread_mutex_unlock(&mmvm_lock);
-    return -1;
-  }
-  struct vm_rg_struct *freerg_node = malloc(sizeof(struct vm_rg_struct));
-  freerg_node->rg_start = rgnode->rg_start;
-  freerg_node->rg_end = rgnode->rg_end;
-  freerg_node->rg_next = NULL;
-
-  rgnode->rg_start = rgnode->rg_end = 0;
-  rgnode->rg_next = NULL;
-
-  /*enlist the obsoleted memory region */
-  enlist_vm_freerg_list(caller->mm, freerg_node);
-
-  pthread_mutex_unlock(&mmvm_lock);
-  return 0;
+    return 0;
 }
 
-/*liballoc - PAGING-based allocate a region memory
- *@proc:  Process executing the instruction
- *@size: allocated size
- *@reg_index: memory region ID (used to identify variable in symbole table)
- */
-int liballoc(struct pcb_t *proc, addr_t size, uint32_t reg_index)
-{
-  addr_t  addr;
-  int val = __alloc(proc, 0, reg_index, size, &addr);
-  if (val == -1)
-  {
-    return -1;
-  }
-#ifdef IODUMP
-  /* TODO dump IO content (if needed) */
-#ifdef PAGETBL_DUMP
-  print_pgtbl(proc, 0, -1); // print max TBL
-#endif
-#endif
-
-  /* By default using vmaid = 0 */
-  return val;
-}
-
-/*libfree - PAGING-based free a region memory
- *@proc: Process executing the instruction
- *@size: allocated size
- *@reg_index: memory region ID (used to identify variable in symbole table)
- */
-
+//----------------------------------------------------------------
+//---------------------<Handle the FREE command>------------------
+//----------------------------------------------------------------
 int libfree(struct pcb_t *proc, uint32_t reg_index)
 {
-  int val = __free(proc, 0, reg_index);
-  if (val == -1)
-  {
-    return -1;
-  }
-printf("%s:%d\n",__func__,__LINE__);
-#ifdef IODUMP
-  /* TODO dump IO content (if needed) */
-#ifdef PAGETBL_DUMP
-  print_pgtbl(proc, 0, -1); // print max TBL
+    if (reg_index >= PAGING_MAX_SYMTBL_SZ) return -1; 
+    // kiểm tra nếu reg_index vượt quá giới hạn thì đánh dấu return -1
+
+    int result = __free(proc, 0, (int)reg_index); 
+    // ta gọi hàm __free để bắt đầu thực hiện giải phóng vùng nhớ
+    if (result != 0) return result; // nếu thất bại thì return -1
+    
+#if defined(IODUMP) && defined(PAGETBL_DUMP) // nếu được định nghĩa đầy đủ thì ta sẽ in ra bảng trang hiện tại
+    print_pgtbl(proc, 0, (addr_t)-1);
+#endif // còn không đủ thì in ra bảng trang hiện tại
+    return 0;
+}
+
+//----------------------------------------------------------------
+//--------------------<Handle the ALLOC command>------------------
+//----------------------------------------------------------------
+int liballoc(struct pcb_t *proc, addr_t size, uint32_t reg_index)
+{
+    if (reg_index >= PAGING_MAX_SYMTBL_SZ) return -1; 
+    // kiểm tra nếu reg_index vượt quá giới hạn thì đánh dấu return -1
+
+    addr_t alloc_addr;
+    int result = __alloc(proc, 0, (int)reg_index, size, &alloc_addr); 
+    // ta gọi hàm __alloc để bắt đầu thực hiện cấp phát vùng nhớ
+    if (result != 0) return result; // nếu thất bại thì return -1
+        
+#if defined(IODUMP) && defined(PAGETBL_DUMP)
+    print_pgtbl(proc, 0, (addr_t)-1);
 #endif
-#endif
-  return 0;//val;
+    return 0;
 }
 
 /*pg_getpage - get the page in ram
@@ -631,70 +601,41 @@ int find_victim_page(struct mm_struct *mm, addr_t *retpgn)
   return 0;
 }
 
-/*get_free_vmrg_area - get a free vm region
- *@caller: caller
- *@vmaid: ID vm area to alloc memory region
- *@size: allocated size
- *
- */
-int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_struct *newrg)
-{
-  struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
+//----------------------------------------------------------------
+//--------------------<Find a free VM region>---------------------
+//----------------------------------------------------------------
+int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_struct *newrg) {
+    if (!caller || !newrg || size <= 0) return -1;
 
-  struct vm_rg_struct *rgit = cur_vma->vm_freerg_list;
+    struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
+    if (!cur_vma) return -1;
 
-  if (rgit == NULL)
-    return -1;
+    const addr_t requested = (addr_t)size;
+    struct vm_rg_struct *prev = NULL;
+    struct vm_rg_struct *cur = cur_vma->vm_freerg_list;
 
-  /* Probe unintialized newrg */
-  newrg->rg_start = newrg->rg_end = -1;
+    while (cur) {
+        if ( (cur->rg_start < cur->rg_end) && (requested <= cur->rg_end - cur->rg_start) ) {
+            newrg->vmaid = vmaid;
+            newrg->rg_start = cur->rg_start;
+            newrg->rg_end = cur->rg_start + requested;
+            newrg->rg_next = NULL;
 
-  /* Traverse on list of free vm region to find a fit space */
-  while (rgit != NULL)
-  {
-    if (rgit->rg_start + size <= rgit->rg_end)
-    { /* Current region has enough space */
-      newrg->rg_start = rgit->rg_start;
-      newrg->rg_end = rgit->rg_start + size;
+            if (newrg->rg_end < cur->rg_end) cur->rg_start = newrg->rg_end;
+            else {
+                if (!prev) cur_vma->vm_freerg_list = cur->rg_next;
+                else prev->rg_next = cur->rg_next;
 
-      /* Update left space in chosen region */
-      if (rgit->rg_start + size < rgit->rg_end)
-      {
-        rgit->rg_start = rgit->rg_start + size;
-      }
-      else
-      { /*Use up all space, remove current node */
-        /*Clone next rg node */
-        struct vm_rg_struct *nextrg = rgit->rg_next;
-
-        /*Cloning */
-        if (nextrg != NULL)
-        {
-          rgit->rg_start = nextrg->rg_start;
-          rgit->rg_end = nextrg->rg_end;
-
-          rgit->rg_next = nextrg->rg_next;
-
-          free(nextrg);
+                free(cur);
+            }
+            return 0;
         }
-        else
-        {                                /*End of free list */
-          rgit->rg_start = rgit->rg_end; // dummy, size 0 region
-          rgit->rg_next = NULL;
-        }
-      }
-      break;
-    }
-    else
-    {
-      rgit = rgit->rg_next; // Traverse next rg
-    }
-  }
 
-  if (newrg->rg_start == -1) // new region not found
+        prev = cur;
+        cur = cur->rg_next;
+    }
+
     return -1;
-
-  return 0;
 }
 
 // #endif
