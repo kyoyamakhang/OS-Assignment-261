@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <pthread.h>
 #include "sysbus.h"
 
 // Maximum number of memory banks supported
@@ -34,12 +35,17 @@ static int g_bank_count = 0;
 static uint8_t* g_os_mem_data = NULL;
 static size_t g_os_mem_size = 0;
 
+// Mutex protecting shared bus memory state and RAM access
+static pthread_mutex_t bus_lock = PTHREAD_MUTEX_INITIALIZER;
+
 // Flag indicating DMA transfer completion from RTL callback
 static volatile int g_dma_done_flag = 0;
 
 void memory_bank_set_os_mem(void* data, size_t size_bytes) {
+    pthread_mutex_lock(&bus_lock);
     g_os_mem_data = (uint8_t*)data;
     g_os_mem_size = size_bytes;
+    pthread_mutex_unlock(&bus_lock);
 }
 
 void dma_reset_done_flag(void) {
@@ -150,14 +156,18 @@ extern "C" {
  */
 int dpi_bank_read32_legacy(long long offset) {
     uint8_t data[4] = {0};
+
+    pthread_mutex_lock(&bus_lock);
     size_t mem_size = memory_bank_get_size();
 
     if (offset < 0 || (uint64_t)offset >= mem_size) {
+        pthread_mutex_unlock(&bus_lock);
         return 0;
     }
 
     void* src = memory_bank_get_ptr((uint64_t)offset);
     if (src == NULL) {
+        pthread_mutex_unlock(&bus_lock);
         return 0;
     }
 
@@ -167,6 +177,7 @@ int dpi_bank_read32_legacy(long long offset) {
     for (size_t i = 0; i < copy_len; i++) {
         data[i] = ((uint8_t*)src)[i];
     }
+    pthread_mutex_unlock(&bus_lock);
 
     return *((uint32_t*)data);
 }
@@ -175,14 +186,17 @@ int dpi_bank_read32_legacy(long long offset) {
  * DPI Callback: Called from RTL when DMA write access
  */
 int dpi_bank_write32_legacy(long long offset, int value) {
+    pthread_mutex_lock(&bus_lock);
     size_t mem_size = memory_bank_get_size();
 
     if (offset < 0 || (uint64_t)offset >= mem_size) {
+        pthread_mutex_unlock(&bus_lock);
         return -1;
     }
 
     void* dst = memory_bank_get_ptr((uint64_t)offset);
     if (dst == NULL) {
+        pthread_mutex_unlock(&bus_lock);
         return -1;
     }
 
@@ -193,6 +207,7 @@ int dpi_bank_write32_legacy(long long offset, int value) {
     for (size_t i = 0; i < copy_len; i++) {
         ((uint8_t*)dst)[i] = bytes[i];
     }
+    pthread_mutex_unlock(&bus_lock);
 
     return 0;
 }
