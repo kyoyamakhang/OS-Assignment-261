@@ -21,13 +21,13 @@
 
 #include "sysbus.h"
 #include "dpi_rtl.h"
+#include "dma.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <cstdbool>
-#include <thread>
-#include <atomic>
+#include <pthread.h>
 
 // Generated DPI functions from RTL
 #include <verilated.h>
@@ -35,39 +35,150 @@
 #include "Vdma_top.h"
 #include "Vdma_top__Dpi.h"  
 
-#if DMA_MAIN == 1
 extern "C" {
 #include "common.h"
 #include "os-mm.h"
-}
+#include "mm.h"
+#ifdef MM64
+#include "mm64.h"
 #endif
+}
 
 // RTL Direct Test - Drive Verilator RTL directly
 extern "C" int dpi_rtl_dma_copy(uint64_t src_offset, uint64_t dst_offset, uint64_t length);
 extern "C" int dpi_rtl_dma_is_available(void);
 
+// Asynchronous DMA request queue for non-blocking CPU offload
+#define DMA_QUEUE_MAX 32
+
+struct dma_req_t {
+    struct pcb_t *caller;
+    uint64_t source;
+    uint64_t destination;
+    uint64_t length;
+};
+
+static pthread_mutex_t dma_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t dma_req_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t dma_done_cond = PTHREAD_COND_INITIALIZER;
+
+static struct dma_req_t g_dma_queue[DMA_QUEUE_MAX];
+static int g_dma_head = 0;
+static int g_dma_tail = 0;
+static int g_dma_count = 0;
+static int g_dma_worker_active = 0;
+static int g_dma_worker_stop = 0;
+
+/*
+ * translate_vaddr_to_paddr - Translate process virtual address to physical RAM bus offset
+ */
+static int translate_vaddr_to_paddr(struct pcb_t *caller, uint64_t vaddr, uint64_t *paddr) {
+    if (paddr == NULL) {
+        return -1;
+    }
+
+#if DMA_MAIN == 0
+    if (caller != NULL) {
+#ifdef MM64
+        uint64_t page_sz = PAGING64_PAGESZ;
+#else
+        uint64_t page_sz = PAGING_PAGESZ;
+#endif
+        addr_t pgn = (addr_t)(vaddr / page_sz);
+        uint64_t page_off = vaddr % page_sz;
+        addr_t pte = 0;
+
+        /* Look up PTE in process user page table first, then kernel page table */
+        if (caller->mm != NULL && caller->mm->pgd != NULL) {
+            pte = pte_get_entry(caller->mm, pgn, caller);
+        }
+        if (pte == 0 && caller->krnl != NULL &&
+            caller->krnl->mm != NULL && caller->krnl->mm->pgd != NULL) {
+            pte = pte_get_entry(caller->krnl->mm, pgn, caller);
+        }
+
+        if (pte != 0) {
+            if (!PAGING_PAGE_PRESENT(pte) || (pte & PAGING_PTE_SWAPPED_MASK)) {
+                return -1;
+            }
+            addr_t fpn = PAGING_FPN(pte);
+            *paddr = (uint64_t)fpn * page_sz + page_off;
+            return 0;
+        }
+
+        /* Reject unmapped virtual address when process VMA is active */
+        if ((caller->mm != NULL && caller->mm->mmap != NULL && caller->mm->mmap->sbrk > 0) ||
+            (caller->krnl != NULL && caller->krnl->mm != NULL &&
+             caller->krnl->mm->mmap != NULL && caller->krnl->mm->mmap->sbrk > 0)) {
+            return -1;
+        }
+    }
+#else
+    (void)caller;
+#endif
+
+    *paddr = vaddr;
+    return 0;
+}
+
 /*
  * dpi_dma_copy - perform DMA copy via DPI
- * src_offset: source memory offset
- * dst_offset: destination memory offset
+ * src_offset: source memory address/offset
+ * dst_offset: destination memory address/offset
  * length: number of bytes to copy
  */
 int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset, uint64_t length) {
     void *src = NULL;
     void *dst = NULL;
-    //struct krnl_t *krnl = caller->krnl;
+    struct krnl_t *krnl = (caller != NULL) ? caller->krnl : NULL;
+    uint64_t first_src_paddr = src_offset;
+    uint64_t first_dst_paddr = dst_offset;
+
+    if (length == 0) {
+        printf("dpi_dma_copy: invalid length 0\n");
+        return -1;
+    }
 
     if (memory_bank_is_available()) {
         printf("dma_testbench modeo with dpi_dma_copy from memory bank\n");
+        size_t bank_sz = memory_bank_get_size();
+        if (src_offset >= bank_sz || dst_offset >= bank_sz ||
+            length > bank_sz - src_offset || length > bank_sz - dst_offset) {
+            printf("dpi_dma_copy: address out of memory bank range\n");
+            return -1;
+        }
         src = memory_bank_get_ptr(src_offset);
         dst = memory_bank_get_ptr(dst_offset);
     } else {
         /*
-         * TODO: map system OS memory address
+         * Map system OS physical memory address (krnl->mram) via page tables
          */
-        //printf("dma_testbench modeo with OS memory address\n");
-        //src =  krnl->...
-        //dst =  krnl->...
+        if (krnl == NULL || krnl->mram == NULL ||
+            krnl->mram->storage == NULL || krnl->mram->maxsz <= 0) {
+            printf("dpi_dma_copy: OS physical memory (mram) is not initialized\n");
+            return -1;
+        }
+
+        size_t mram_sz = (size_t)krnl->mram->maxsz;
+        if (translate_vaddr_to_paddr(caller, src_offset, &first_src_paddr) != 0 ||
+            translate_vaddr_to_paddr(caller, dst_offset, &first_dst_paddr) != 0) {
+            printf("dpi_dma_copy: failed to translate virtual address to physical bus address\n");
+            return -1;
+        }
+
+        if (first_src_paddr >= mram_sz || first_dst_paddr >= mram_sz) {
+            printf("dpi_dma_copy: physical address out of OS mram range\n");
+            return -1;
+        }
+
+        printf("dma_testbench modeo with OS memory address\n");
+        memory_bank_set_os_mem(krnl->mram->storage, mram_sz);
+        src = krnl->mram->storage + first_src_paddr;
+        dst = krnl->mram->storage + first_dst_paddr;
+    }
+
+    if (src == NULL || dst == NULL) {
+        return -1;
     }
 
     printf("dpi_dma_copy: src=%llu, dst=%llu, len=%llu\n", 
@@ -75,12 +186,15 @@ int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset,
 		    (unsigned long long) dst_offset,
 		    (unsigned long long) length);
 
-    uint8_t* psrc = (uint8_t*)src;
-    uint64_t pattern_length = (length <= 255) ? length : 255;
-    
-    for (uint64_t i = 0; i < length; i++) {
-        // Pattern cycles through 0x01 to min(length, 255)
-        psrc[i] = (uint8_t)((i % pattern_length) + 1);
+    /* Only initialize synthetic test pattern in standalone testbench mode */
+    if (memory_bank_is_available()) {
+        uint8_t* psrc = (uint8_t*)src;
+        uint64_t pattern_length = (length <= 255) ? length : 255;
+        
+        for (uint64_t i = 0; i < length; i++) {
+            // Pattern cycles through 0x01 to min(length, 255)
+            psrc[i] = (uint8_t)((i % pattern_length) + 1);
+        }
     }
 
     printf("Before copy:\n");
@@ -103,8 +217,53 @@ int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset,
 
     printf("\nCalling RTL DMA...\n");
     
-    // Call the RTL DMA function directly with provided parameters
-    int result = dpi_rtl_dma_copy(src_offset, dst_offset, length);
+    int result = 0;
+    if (memory_bank_is_available()) {
+        // Standalone mode: contiguous offset in memory bank
+        result = dpi_rtl_dma_copy(src_offset, dst_offset, length);
+    } else {
+        // OS mode: split transfer across page boundaries so each chunk is physically contiguous
+#ifdef MM64
+        uint64_t page_sz = PAGING64_PAGESZ;
+#else
+        uint64_t page_sz = PAGING_PAGESZ;
+#endif
+        size_t mram_sz = (size_t)krnl->mram->maxsz;
+        uint64_t cur_src_vaddr = src_offset;
+        uint64_t cur_dst_vaddr = dst_offset;
+        uint64_t remaining = length;
+
+        while (remaining > 0) {
+            uint64_t src_page_rem = page_sz - (cur_src_vaddr % page_sz);
+            uint64_t dst_page_rem = page_sz - (cur_dst_vaddr % page_sz);
+            uint64_t chunk_len = remaining;
+            if (chunk_len > src_page_rem) chunk_len = src_page_rem;
+            if (chunk_len > dst_page_rem) chunk_len = dst_page_rem;
+
+            uint64_t chunk_src_paddr = 0;
+            uint64_t chunk_dst_paddr = 0;
+            if (translate_vaddr_to_paddr(caller, cur_src_vaddr, &chunk_src_paddr) != 0 ||
+                translate_vaddr_to_paddr(caller, cur_dst_vaddr, &chunk_dst_paddr) != 0) {
+                result = -1;
+                break;
+            }
+
+            if (chunk_src_paddr >= mram_sz || chunk_dst_paddr >= mram_sz ||
+                chunk_len > mram_sz - chunk_src_paddr || chunk_len > mram_sz - chunk_dst_paddr) {
+                result = -1;
+                break;
+            }
+
+            if (dpi_rtl_dma_copy(chunk_src_paddr, chunk_dst_paddr, chunk_len) != 0) {
+                result = -1;
+                break;
+            }
+
+            cur_src_vaddr += chunk_len;
+            cur_dst_vaddr += chunk_len;
+            remaining -= chunk_len;
+        }
+    }
     
     printf("\nAfter copy:\n");
     printf("  src[0] = 0x%02x, src[1] = 0x%02x\n"
@@ -128,6 +287,53 @@ int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset,
 }
 
 /*
+ * dma_worker_loop - Asynchronous co-processor worker loop
+ */
+extern "C" void dma_worker_loop(void) {
+    pthread_mutex_lock(&dma_lock);
+    g_dma_worker_active = 1;
+    g_dma_worker_stop = 0;
+
+    while (1) {
+        while (g_dma_count == 0 && !g_dma_worker_stop) {
+            pthread_cond_wait(&dma_req_cond, &dma_lock);
+        }
+
+        if (g_dma_count == 0 && g_dma_worker_stop) {
+            break;
+        }
+
+        /* Dequeue next DMA request */
+        struct dma_req_t req = g_dma_queue[g_dma_head];
+        g_dma_head = (g_dma_head + 1) % DMA_QUEUE_MAX;
+        g_dma_count--;
+        pthread_cond_signal(&dma_done_cond);
+        pthread_mutex_unlock(&dma_lock);
+
+        /* Execute DMA transfer asynchronously on the co_processor thread */
+        int err = dpi_dma_copy(req.caller, req.source, req.destination, req.length);
+        if (err == 0 && !dma_is_done()) {
+            dma_done_callback();
+        }
+
+        pthread_mutex_lock(&dma_lock);
+    }
+
+    g_dma_worker_active = 0;
+    pthread_mutex_unlock(&dma_lock);
+}
+
+/*
+ * dma_stop_worker - Stop asynchronous co-processor worker loop
+ */
+extern "C" void dma_stop_worker(void) {
+    pthread_mutex_lock(&dma_lock);
+    g_dma_worker_stop = 1;
+    pthread_cond_signal(&dma_req_cond);
+    pthread_mutex_unlock(&dma_lock);
+}
+
+/*
  * do_dma - perform DMA function
  * source: source memory
  * destination: destination memory
@@ -137,15 +343,36 @@ extern "C" int do_dma(struct pcb_t *caller,uint64_t source, uint64_t destination
     
     int test_errors = 0;
 
-    /* Perform DMA copy using DPI with provided caller and parameters */
-    test_errors += dpi_dma_copy(caller, source, destination, length);
+    if (length == 0) {
+        return -1;
+    }
 
-    /*
-     * TODO: This asynchronous implementation of DMA
-     *        DMA completion callback is not yet implemented in this testbench
-     */
-    // Install callback handler
-    //dma_done_callback();  // Call the callback to signal DMA completion
+    pthread_mutex_lock(&dma_lock);
+    if (g_dma_worker_active) {
+        /* Wait only if the hardware request queue is completely full */
+        while (g_dma_count >= DMA_QUEUE_MAX && !g_dma_worker_stop) {
+            pthread_cond_wait(&dma_done_cond, &dma_lock);
+        }
+
+        /* Enqueue DMA descriptor and return immediately (Asynchronous non-blocking) */
+        g_dma_queue[g_dma_tail].caller = caller;
+        g_dma_queue[g_dma_tail].source = source;
+        g_dma_queue[g_dma_tail].destination = destination;
+        g_dma_queue[g_dma_tail].length = length;
+        g_dma_tail = (g_dma_tail + 1) % DMA_QUEUE_MAX;
+        g_dma_count++;
+
+        pthread_cond_signal(&dma_req_cond);
+        pthread_mutex_unlock(&dma_lock);
+        return 0;
+    }
+    pthread_mutex_unlock(&dma_lock);
+
+    /* Standalone testbench mode: perform DMA copy directly */
+    test_errors += dpi_dma_copy(caller, source, destination, length);
+    if (test_errors == 0 && !dma_is_done()) {
+        dma_done_callback();
+    }
 
     return test_errors;
 }

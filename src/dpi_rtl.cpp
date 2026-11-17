@@ -82,6 +82,13 @@ extern "C" int dpi_rtl_dma_copy(uint64_t source, uint64_t destination, uint64_t 
         printf("Cannot perform DMA copy: RTL simulation not initialized\n");
         return -1;
     }
+
+    if (length == 0) {
+        printf("Cannot perform DMA copy: invalid length 0\n");
+        return -1;
+    }
+
+    dma_reset_done_flag();
     
     //printf("RTL DMA Copy: src=%llu, dst=%llu, len=%llu\n",
     //       (unsigned long long) source,
@@ -115,7 +122,7 @@ extern "C" int dpi_rtl_dma_copy(uint64_t source, uint64_t destination, uint64_t 
     int cycle = 0;
     int max_cycles = 100000;
     
-    while (cycle < max_cycles && !top->ch_done) {
+    while (cycle < max_cycles && !top->ch_done && !top->ch_error) {
         top->clk ^= 1;
         top->eval();
         
@@ -145,7 +152,11 @@ extern "C" int dpi_rtl_dma_copy(uint64_t source, uint64_t destination, uint64_t 
     
     //printf("RTL DMA Copy: Completed in %d cycles, ch_done=%d\n", cycle, (int)top->ch_done);
 
-    return top->ch_done ? 0 : -1;
+    if (top->ch_error || !top->ch_done) {
+        return -1;
+    }
+
+    return 0;
 }
 
 

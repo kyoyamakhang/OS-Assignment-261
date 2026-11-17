@@ -29,6 +29,8 @@ struct pcb_t;
  * length: number of bytes to copy
  */
 int do_dma(struct pcb_t *caller, uint64_t source, uint64_t destination, uint64_t length);
+void dma_worker_loop(void);
+void dma_stop_worker(void);
 
 #ifdef __cplusplus
 }

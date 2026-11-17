@@ -43,6 +43,13 @@ size_t memory_bank_get_size(void);
 // Check if memory bank is initialized
 int memory_bank_is_available(void);
 
+// Bind OS physical memory (mram->storage) to system bus for DMA access
+void memory_bank_set_os_mem(void* data, size_t size_bytes);
+
+// DMA completion flag helpers
+void dma_reset_done_flag(void);
+int dma_is_done(void);
+
 // DPI Callback: Called from RTL when DMA read access
 int dpi_bank_read32_legacy(long long offset);
 
