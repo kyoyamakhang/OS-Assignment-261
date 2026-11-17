@@ -279,6 +279,7 @@ int main(int argc, char * argv[]) {
 
 	/* Create MEM RAM */
 	init_memphy(&mram, memramsz, rdmflag);
+	memory_bank_set_os_mem(mram.storage, (size_t)mram.maxsz);
 
         /* Create all MEM SWAP */ 
 	int sit;
