@@ -26,6 +26,7 @@
 
 #include "sysbus.h"
 #include "dpi_rtl.h"
+#include "dma.h"
 
 static int time_slot;
 static int num_cpus;
@@ -128,11 +129,8 @@ static void * co_processor(void *arg) {
         return (void*)1;
     }
 	
-	/* TODO: This asynchronous implementation of DMA
-     *        DMA completion callback is not yet implemented in this testbench
-     */
-    // Install callback handler
-    //dma_done_callback();  // Call the callback to signal DMA completion
+	/* Asynchronous implementation of DMA co-processor worker */
+    dma_worker_loop();
     return NULL;
 }
 
@@ -321,6 +319,10 @@ int main(int argc, char * argv[]) {
 		pthread_join(cpu[i], NULL);
 	}
 	pthread_join(ld, NULL);
+
+	/* Stop co-processor worker and wait for it to finish */
+	dma_stop_worker();
+	pthread_join(*dma, NULL);
 
 	/* Stop timer */
 	stop_timer();
